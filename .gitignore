@@ -1,6 +1,11 @@
-﻿################################################################################
+################################################################################
 # この .gitignore ファイルは Microsoft(R) Visual Studio によって自動的に作成されました。
 ################################################################################
 
 /bin/Debug/net8.0
 /obj
+.vs/
+OracleStoredUnitLibrary/bin/
+OracleStoredUnitLibrary/obj/
+UnitTestSample/bin/
+UnitTestSample/obj/

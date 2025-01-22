@@ -1,12 +1,12 @@
 ﻿using Oracle.ManagedDataAccess.Client;
 using Oracle.ManagedDataAccess.Types;
 using System.Data;
-
-namespace UnitStored
+using Microsoft.Extensions.Configuration;
+namespace OracleStoredUnitLibrary
 {
     public class StoredUnitFixture : IDisposable
     {
-        private readonly string _connectionString; // TODO 呼び出しもとで設定できるようにする
+        private readonly string _connectionString;
         public OracleConnection Connection { get; private set; }
         private readonly bool _insertMockData = false;
 
@@ -14,13 +14,30 @@ namespace UnitStored
         {
             Console.WriteLine("StoredUnitFixture: 初期化処理");
 
+            var configuration = new ConfigurationBuilder()
+                .SetBasePath(Directory.GetCurrentDirectory())
+                .AddJsonFile(path: "AppSettings.json")
+                .Build();
+
+            if(String.IsNullOrEmpty(configuration.GetConnectionString("DefaultConnection"))) throw new ArgumentNullException("DefaultConnectionを設定してください。");
+
+            _connectionString = configuration.GetConnectionString("DefaultConnection");
             Connection = new OracleConnection(_connectionString);
             Connection.Open();
 
         }
 
-        public T ExecuteFunction<T>(string functionName, params OracleParameter[] parameters)
+        /// <summary>
+        /// Oracle関数を実行し、結果を取得します。
+        /// </summary>
+        /// <typeparam name="T">戻り値の型</typeparam>
+        /// <param name="functionName">実行する関数の名前</param>
+        /// <param name="parameters">関数に渡すパラメータ</param>
+        /// <returns>関数の実行結果</returns>
+        public T ExecuteFunction<T>(string functionName, OracleParameter[]? parameters = null)
         {
+            if(String.IsNullOrEmpty(functionName)) throw new ArgumentNullException(nameof(functionName));
+
             using (var command = new OracleCommand($"BEGIN :result := {functionName}; END;", Connection))
             {
 
@@ -30,7 +47,10 @@ namespace UnitStored
                 };
 
                 command.Parameters.Add(resultParam);
-                command.Parameters.AddRange(parameters);
+                if (parameters != null)
+                {
+                    command.Parameters.AddRange(parameters);
+                }
 
                 command.ExecuteNonQuery();
 
@@ -38,21 +58,33 @@ namespace UnitStored
             }
         }
 
-        public void ExecuteProcedure<T>(string procedureName, params OracleParameter[] parameters)
+        /// <summary>
+        /// Oracleストアドプロシージャを実行します。
+        /// </summary>
+        /// <param name="procedureName">実行するプロシージャの名前</param>
+        /// <param name="parameters">プロシージャに渡すパラメータ</param>
+        public void ExecuteProcedure(string procedureName, OracleParameter[]? parameters = null)
         {
+            if(String.IsNullOrEmpty(procedureName)) throw new ArgumentNullException(nameof(procedureName));
+
             using (var command = new OracleCommand($"BEGIN {procedureName}; END;", Connection))
             {
-                var resultParam = new OracleParameter("result", GetOracleDbType(typeof(T)))
-                {
-                    Direction = ParameterDirection.ReturnValue
-                };
 
-                command.Parameters.AddRange(parameters);
+                if(parameters != null)
+                {
+                    command.Parameters.AddRange(parameters);
+                }
 
                 command.ExecuteNonQuery();
             }
         }
 
+        /// <summary>
+        /// Oracleストアドプロシージャを実行し、OUTパラメータの結果を取得します。
+        /// </summary>
+        /// <param name="procedureName">実行するプロシージャの名前</param>
+        /// <param name="parameters">プロシージャに渡すパラメータ</param>
+        /// <returns>OUTパラメータの結果</returns>
         public Dictionary<string, object> ExecuteStoredProcedureOut(
         string procedureName,
         Dictionary<string, (object value, OracleDbType dbType, ParameterDirection direction)> parameters)
@@ -97,6 +129,13 @@ namespace UnitStored
             return results;
         }
 
+        /// <summary>
+        /// クエリを実行し、スカラー値を取得します。
+        /// </summary>
+        /// <typeparam name="T">戻り値の型</typeparam>
+        /// <param name="query">実行するクエリ</param>
+        /// <param name="parameters">クエリに渡すパラメータ</param>
+        /// <returns>クエリの実行結果</returns>
         public T ExecuteScalar<T>(string query, params OracleParameter[] parameters)
         {
             using (var command = new OracleCommand(query, Connection))
@@ -111,6 +150,12 @@ namespace UnitStored
             }
         }
 
+        /// <summary>
+        /// クエリを実行し、結果をリストとして取得します。
+        /// </summary>
+        /// <param name="query">実行するクエリ</param>
+        /// <param name="parameters">クエリに渡すパラメータ</param>
+        /// <returns>クエリの実行結果</returns>
         public List<Dictionary<string, object>> ExecuteQuery(string query, params OracleParameter[] parameters)
         {
             using (var command = new OracleCommand(query, Connection))
@@ -137,6 +182,11 @@ namespace UnitStored
             }
         }
 
+        /// <summary>
+        /// クエリを実行し、結果を返さずに処理を行います。
+        /// </summary>
+        /// <param name="query">実行するクエリ</param>
+        /// <param name="parameters">クエリに渡すパラメータ</param>
         public void ExecuteNonQuery(string query, params OracleParameter[] parameters)
         {
             using (var command = new OracleCommand(query, Connection))
@@ -150,6 +200,11 @@ namespace UnitStored
             }
         }
 
+        /// <summary>
+        /// 型に応じたOracleDbTypeを取得します。
+        /// </summary>
+        /// <param name="type">型情報</param>
+        /// <returns>対応するOracleDbType</returns>
         private OracleDbType GetOracleDbType(Type type)
         {
             if (type == typeof(bool))
@@ -164,6 +219,12 @@ namespace UnitStored
             throw new ArgumentException("Unsupported type");
         }
 
+        /// <summary>
+        /// Oracleの値を指定された型に変換します。
+        /// </summary>
+        /// <typeparam name="T">変換後の型</typeparam>
+        /// <param name="value">変換する値</param>
+        /// <returns>変換後の値</returns>
         private T ConvertOracleValue<T>(object value)
         {
             if (typeof(T) == typeof(bool))
@@ -183,9 +244,15 @@ namespace UnitStored
                 return (T)(object)value.ToString();
             }
 
-            throw new InvalidCastException("Unsupported type conversion");
+            throw new InvalidCastException($"{typeof(T)}はキャスト出来ませんでした。if文を追加し実装してください。");
         }
 
+        /// <summary>
+        /// システムの値を指定された型に変換します。
+        /// </summary>
+        /// <typeparam name="T">変換後の型</typeparam>
+        /// <param name="value">変換する値</param>
+        /// <returns>変換後の値</returns>
         private T ConvertSystemValue<T>(object value)
         {
 
@@ -218,6 +285,12 @@ namespace UnitStored
             throw new InvalidCastException("Unsupported type conversion");
         }
 
+        /// <summary>
+        /// Oracleの値を指定されたOracleDbTypeに変換します。
+        /// </summary>
+        /// <param name="oracleValue">変換する値</param>
+        /// <param name="dbType">変換後のOracleDbType</param>
+        /// <returns>変換後の値</returns>
         private object ConvertOracleValue(object oracleValue, OracleDbType dbType)
         {
             if (oracleValue == DBNull.Value)
@@ -240,8 +313,7 @@ namespace UnitStored
 
         public void Dispose()
         {
-            // 各テストの後に実行される共通のクリーンアップ処理
-            Console.WriteLine("StoredUnitFixture: クリーンアップ処理");
+            Console.WriteLine("StoredUnitFixture: Dispose");
 
             if (Connection != null)
             {
